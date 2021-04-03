@@ -5,6 +5,7 @@ pub const panic = sabaton.panic;
 
 const std = @import("std");
 
+pub const smp = @import("smp.zig");
 pub const display = @import("display.zig");
 
 pub const acpi = struct {
@@ -32,6 +33,7 @@ pub fn get_page_size() u64 {
 export fn _main() linksection(".text.main") noreturn {
   page_size = sabaton.paging.detect_page_size();
   sabaton.fw_cfg.init_from_dtb();
+  smp.prepare();
   @call(.{.modifier = .always_inline}, sabaton.main, .{});
 }
 
