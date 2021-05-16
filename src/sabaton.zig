@@ -185,6 +185,7 @@ pub fn main() noreturn {
   }
 
   const dram = platform.get_dram();
+  const dram_base = @ptrToInt(dram.ptr);
 
   var kernel_elf = Elf {
     .data = platform.get_kernel(),
@@ -201,23 +202,22 @@ pub fn main() noreturn {
   platform.add_platform_tags(&kernel_header);
 
   // Allocate space for backing pages of the kernel
-  pmm.switch_state(.KernelPages);
+  pmm.switch_state(dram_base, .KernelPages);
   sabaton.puts("Allocating kernel memory\n");
   const kernel_memory_pool = pmm.alloc_aligned(kernel_elf.paged_bytes(), .KernelPage);
   sabaton.log_hex("Bytes allocated for kernel: ", kernel_memory_pool.len);
 
   // TODO: Allocate and put modules here
 
-  pmm.switch_state(.PageTables);
+  pmm.switch_state(dram_base, .PageTables);
   paging_root = paging.init_paging();
   platform.map_platform(&paging_root);
   {
-    const dram_base = @ptrToInt(dram.ptr);
     sabaton.paging.map(dram_base, dram_base, dram.len, .rwx, .memory, &paging_root);
     sabaton.paging.map(dram_base + upper_half_phys_base, dram_base, dram.len, .rwx, .memory, &paging_root);
   }
 
-  paging.apply_paging(&paging_root);
+  @call(.{.modifier = .never_inline}, paging.apply_paging, .{&paging_root});
   // Check the flags in the stivale2 header
   sabaton.puts("Loading kernel into memory\n");
   kernel_elf.load(kernel_memory_pool);
@@ -225,7 +225,7 @@ pub fn main() noreturn {
   if(sabaton.debug)
     sabaton.puts("Sealing PMM\n");
 
-  pmm.switch_state(.Sealed);
+  pmm.switch_state(dram_base, .Sealed);
 
   // Maybe do these conditionally one day once we parse stivale2 kernel tags?
   if(@hasDecl(platform, "display")) {
@@ -302,7 +302,7 @@ pub const fb_bpp = 4;
 pub const fb_pitch = fb_width * fb_bpp;
 pub const fb_bytes = fb_pitch * fb_height;
 
-var fb: packed struct {
+pub var fb: packed struct {
   tag: Stivale2tag = .{
     .ident = 0x506461d2950408fa,
     .next = null,

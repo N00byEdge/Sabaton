@@ -79,6 +79,8 @@ pub fn board_supported(arch: builtin.Arch, target_name: []const u8) bool {
     .aarch64 => {
       if(std.mem.eql(u8, target_name, "virt"))
         return true;
+      if(std.mem.eql(u8, target_name, "pi3"))
+        return true;
       if(std.mem.eql(u8, target_name, "pine"))
         return true;
       return false;
@@ -100,7 +102,7 @@ pub fn build_elf(b: *Builder, arch: builtin.Arch, target_name: []const u8, path_
 
   elf.addBuildOption([] const u8, "board_name", target_name);
   freestanding_target(elf, arch, true);
-  elf.setBuildMode(.ReleaseSmall);
+  elf.setBuildMode(.ReleaseSafe);
 
   elf.setMainPkgPath(b.fmt("{s}src/", .{path_prefix}));
   elf.setOutputDir(b.cache_root);
@@ -151,6 +153,22 @@ fn section_blob(b: *Builder, elf: *std.build.LibExeObjStep, mode: pad_mode, sect
   return dump_step;
 }
 
+fn pi3_kernel8(b: *Builder, elf: *std.build.LibExeObjStep) !*TransformFileCommandStep {
+  const dumped_path = b.fmt("{s}.bin", .{elf.getOutputPath()});
+
+  const dump_step = try make_transform(b, &elf.step,
+    &[_][]const u8 {
+      "llvm-objcopy", "-O", "binary",
+      elf.getOutputPath(), dumped_path,
+    },
+    dumped_path,
+  );
+
+  dump_step.step.dependOn(&elf.step);
+
+  return dump_step;
+}
+
 fn blob(b: *Builder, elf: *std.build.LibExeObjStep, mode: pad_mode) !*TransformFileCommandStep {
   return section_blob(b, elf, mode, ".blob");
 }
@@ -178,6 +196,11 @@ pub fn build_blob(b: *Builder, arch: builtin.Arch, target_name: []const u8, path
   return blob(b, elf, .Padded);
 }
 
+pub fn build_pi3_kernel8(b: *Builder, arch: builtin.Arch, target_name: []const u8, path_prefix: []const u8) !*TransformFileCommandStep {
+  const elf = try build_elf(b, arch, target_name, path_prefix);
+  return pi3_kernel8(b, elf);
+}
+
 fn qemu_aarch64(b: *Builder, board_name: []const u8, desc: []const u8, dep_elf: *std.build.LibExeObjStep) !void {
   const command_step = b.step(board_name, desc);
 
@@ -196,6 +219,27 @@ fn qemu_aarch64(b: *Builder, board_name: []const u8, desc: []const u8, dep_elf: 
       "-smp", "8",
       "-device", "ramfb",
       "-fw_cfg", "opt/Sabaton/kernel,file=test/Flork_stivale2_aarch64",
+    };
+
+  const run_step = b.addSystemCommand(params);
+  run_step.step.dependOn(&dep.step);
+  command_step.dependOn(&run_step.step);
+}
+
+fn qemu_pi_aarch64(b: *Builder, desc: []const u8, dep_elf: *std.build.LibExeObjStep) !void {
+  const command_step = b.step("pi3", desc);
+
+  const dep = try pi3_kernel8(b, dep_elf);
+
+  const params =
+    &[_][]const u8 {
+      "qemu-system-aarch64",
+      "-M", "raspi3",
+      "-device", "loader,file=test/Flork_stivale2_aarch64,addr=0x200000,force-raw=on",
+      "-serial", "null",
+      "-serial", "stdio",
+      "-d", "int",
+      "-kernel", dep.output_path
     };
 
   const run_step = b.addSystemCommand(params);
@@ -222,7 +266,10 @@ pub fn build(b: *Builder) !void {
     "Run aarch64 sabaton on for the qemu virt board",
     try build_elf(b, builtin.Arch.aarch64, "virt", "./"),
   );
-
+  try qemu_pi_aarch64(b,
+    "Run aarch64 sabaton on for the qemu raspi3 board",
+    try build_elf(b, builtin.Arch.aarch64, "pi3", "./"),
+  );
   {
     const assembly_blobs = &[_]AssemblyBlobSpec {
       .{.path = "src/platform/pine_aarch64/identity.S", .name = "identity_pine", .arch = .aarch64},

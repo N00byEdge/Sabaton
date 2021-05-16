@@ -66,7 +66,7 @@ pub fn verify_transition(s: pmm_state) void {
   }
 }
 
-pub fn switch_state(new_state: pmm_state) void {
+pub fn switch_state(dram: usize, new_state: pmm_state) void {
   verify_transition(new_state);
 
   // Transition out of current state and apply changes
@@ -76,10 +76,10 @@ pub fn switch_state(new_state: pmm_state) void {
   var current_base = sabaton.near("pmm_head").read(u64);
   current_base += page_size - 1;
   current_base &= ~(page_size - 1);
-
+  
   const eff_idx = @as(usize, @enumToInt(current_state)) * 3;
   const current_entry = sabaton.near("dram_base").addr(u64);
-
+  current_entry[eff_idx + 0] = dram;
   // Size = head - base
   current_entry[eff_idx + 1] = current_base - current_entry[eff_idx + 0];
   // next_base = head
